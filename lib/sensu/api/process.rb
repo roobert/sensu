@@ -499,6 +499,58 @@ module Sensu
         end
       end
 
+      aget "/results/?" do
+        response = Array.new
+        settings.redis.smembers("clients") do |clients|
+          unless clients.empty?
+            clients.each_with_index do |client_name, index|
+              settings.redis.hgetall("results:#{client_name}") do |results|
+                results.each do |check_name, result_json|
+                  response << MultiJson.load(result_json)
+                end
+                if index == clients.size - 1
+                  body MultiJson.dump(response)
+                end
+              end
+            end
+          else
+            body MultiJson.dump(response)
+          end
+        end
+      end
+
+      aget %r{/results/([\w\.-]+)/?$} do |client_name|
+        response = Array.new
+        settings.redis.hgetall("results:#{client_name}") do |results|
+          results.each do |check_name, result_json|
+            response << MultiJson.load(result_json)
+          end
+          body MultiJson.dump(response)
+        end
+      end
+
+      aget %r{/results?/([\w\.-]+)/([\w\.-]+)/?$} do |client_name, check_name|
+        settings.redis.hgetall("results:#{client_name}") do |results|
+          result_json = results[check_name]
+          unless result_json.nil?
+            body result_json
+          else
+            not_found!
+          end
+        end
+      end
+
+      adelete %r{/results?/([\w\.-]+)/([\w\.-]+)/?$} do |client_name, check_name|
+        settings.redis.hgetall("results:#{client_name}") do |results|
+          if results.include?(check_name)
+            resolve_event(results[check_name])
+            issued!
+          else
+            not_found!
+          end
+        end
+      end
+
       apost "/resolve/?" do
         rules = {
           :client => {:type => String, :nil_ok => false},
