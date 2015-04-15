@@ -199,31 +199,34 @@ module Sensu
         end
       end
 
-      # Store check result data. This method stores the 21 most recent
-      # check result statuses for a client/check pair, this history
-      # is used for event context and flap detection. The check
-      # execution timestamp is also stored, to provide an indication
-      # of how recent the data is.
+      # Store check result data. This method stores check result data
+      # and the 21 most recent check result statuses for a client/check
+      # pair, this history is used for event context and flap detection.
+      # The check execution timestamp is also stored, to provide an
+      # indication of how recent the data is.
       #
       # @param client [Hash]
       # @param check [Hash]
       # @param callback [Proc] to call when the check result data has
       #   been stored (history, etc).
       def store_check_result(client, check, &callback)
-        @redis.sadd("history:#{client[:name]}", check[:name])
+        @logger.debug("storing check result", :check => check)
+        @redis.sadd("result:#{client[:name]}", check[:name])
         result_key = "#{client[:name]}:#{check[:name]}"
-        history_key = "history:#{result_key}"
-        @redis.rpush(history_key, check[:status]) do
-          @redis.set("execution:#{result_key}", check[:executed])
-          @redis.ltrim(history_key, -21, -1)
-          callback.call
+        check_truncated = check.merge(:output => check[:output][0..256])
+        @redis.set("result:#{result_key}", MultiJson.dump(check_truncated)) do
+          history_key = "history:#{result_key}"
+          @redis.rpush(history_key, check[:status]) do
+            @redis.ltrim(history_key, -21, -1)
+            callback.call
+          end
         end
       end
 
       # Fetch the execution history for a client/check pair, the 21
       # most recent check result statuses. This method also calculates
       # the total state change percentage for the history, this value
-      # is use for check state flat detection, using a similar
+      # is use for check state flap detection, using a similar
       # algorithm to Nagios:
       # http://nagios.sourceforge.net/docs/3_0/flapping.html
       #
